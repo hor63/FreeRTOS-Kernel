@@ -35,6 +35,7 @@ Changes from V2.6.0
 */
 
 #include <stdlib.h>
+#include <avr/io.h>
 #include <avr/interrupt.h>
 
 #include "FreeRTOS.h"
@@ -47,12 +48,24 @@ Changes from V2.6.0
 /* Start tasks with interrupts enables. */
 #define portFLAGS_INT_ENABLED					( ( StackType_t ) 0x80 )
 
+#if defined (__AVR_ATmega164A__) || defined (__AVR_ATmega164PA__) || (__AVR_ATmega324A__) || defined (__AVR_ATmega324PA__) || (__AVR_ATmega644A__) || defined (__AVR_ATmega644PA__) || (__AVR_ATmega1284__) || defined (__AVR_ATmega1284P__)
+
+// Waveform Generation Mode bits (WGM) are spread over two registers TCCR1A and TCCR1B
+#define portCLEAR_COUNTER_ON_MATCH_TCCR1A		0
+#define portCLEAR_COUNTER_ON_MATCH_TCCR1B		_BV(WGM12) // Set the timer to Clear Timer on Compare Match (CTC) mode 4
+#define portPRESCALE_64							( ( uint8_t ) 0x03 )
+#define portCLOCK_PRESCALER						( ( uint32_t ) 64 )
+#define portCOMPARE_MATCH_A_INTERRUPT_ENABLE	_BV(OCIE1A)
+
+#else // The original ATMega323 port
+
 /* Hardware constants for timer 1. */
 #define portCLEAR_COUNTER_ON_MATCH				( ( uint8_t ) 0x08 )
 #define portPRESCALE_64							( ( uint8_t ) 0x03 )
 #define portCLOCK_PRESCALER						( ( uint32_t ) 64 )
 #define portCOMPARE_MATCH_A_INTERRUPT_ENABLE	( ( uint8_t ) 0x10 )
 
+#endif // #if defined (__AVR_ATmega164A__) ...
 /*-----------------------------------------------------------*/
 
 /* We require the address of the pxCurrentTCB variable, but don't want to know
@@ -361,25 +374,38 @@ void vPortYieldFromTick( void )
  */
 static void prvSetupTimerInterrupt( void )
 {
-uint32_t ulCompareMatch;
+const uint32_t ulCompareMatch = (configCPU_CLOCK_HZ / configTICK_RATE_HZ / portCLOCK_PRESCALER) - 1;
 uint8_t ucHighByte, ucLowByte;
 
 	/* Using 16bit timer 1 to generate the tick.  Correct fuses must be
 	selected for the configCPU_CLOCK_HZ clock. */
+	
+	/* Calculate the compare value from the sytem clock, the desired tick rate, and the prescaler value
+	 * and subtract 1 for adjustment
+	 */
+#if defined (__AVR_ATmega164A__) || defined (__AVR_ATmega164PA__) || (__AVR_ATmega324A__) || defined (__AVR_ATmega324PA__) || (__AVR_ATmega644A__) || defined (__AVR_ATmega644PA__) || (__AVR_ATmega1284__) || defined (__AVR_ATmega1284P__)
 
-	ulCompareMatch = configCPU_CLOCK_HZ / configTICK_RATE_HZ;
+	/* Set the compare value
+	 * Yes, GCC can write a 16-bit registers at once.
+	 */
+	OCR1A = (uint16_t)(ulCompareMatch & 0xffff);
 
-	/* We only have 16 bits so have to scale to get our required tick rate. */
-	ulCompareMatch /= portCLOCK_PRESCALER;
+	TCCR1A = portCLEAR_COUNTER_ON_MATCH_TCCR1A; // Set the timer to Clear Timer on Compare Match (CTC) mode 4
+	
+	TCCR1B = 0
+	| portCLEAR_COUNTER_ON_MATCH_TCCR1B // Set the timer to Clear Timer on Compare Match (CTC) mode 4
+	| portPRESCALE_64 // Clock from 1/64 prescaler
+	;
+	
+	// Enable the interrupt Output Compare A Match
+	TIMSK1 = portCOMPARE_MATCH_A_INTERRUPT_ENABLE;
 
-	/* Adjust for correct value. */
-	ulCompareMatch -= ( uint32_t ) 1;
+#else // The original ATMega323 port
 
 	/* Setup compare match value for compare match A.  Interrupts are disabled 
 	before this is called so we need not worry here. */
 	ucLowByte = ( uint8_t ) ( ulCompareMatch & ( uint32_t ) 0xff );
-	ulCompareMatch >>= 8;
-	ucHighByte = ( uint8_t ) ( ulCompareMatch & ( uint32_t ) 0xff );
+	ucHighByte = ( uint8_t ) ( (ulCompareMatch >>= 8) & ( uint32_t ) 0xff );
 	OCR1AH = ucHighByte;
 	OCR1AL = ucLowByte;
 
@@ -392,6 +418,7 @@ uint8_t ucHighByte, ucLowByte;
 	ucLowByte = TIMSK;
 	ucLowByte |= portCOMPARE_MATCH_A_INTERRUPT_ENABLE;
 	TIMSK = ucLowByte;
+#endif // #if defined (__AVR_ATmega164A__)  ...
 }
 /*-----------------------------------------------------------*/
 
@@ -402,8 +429,11 @@ uint8_t ucHighByte, ucLowByte;
 	 * the context is saved at the start of vPortYieldFromTick().  The tick
 	 * count is incremented after the context is saved.
 	 */
-	void SIG_OUTPUT_COMPARE1A( void ) __attribute__ ( ( signal, naked ) );
-	void SIG_OUTPUT_COMPARE1A( void )
+/*
+ *	void SIG_OUTPUT_COMPARE1A( void ) __attribute__ ( ( signal, naked ) );
+ *	void SIG_OUTPUT_COMPARE1A( void )
+ */
+ISR(TIMER1_COMPA_vect,ISR_NAKED)
 	{
 		vPortYieldFromTick();
 		asm volatile ( "reti" );
@@ -415,8 +445,11 @@ uint8_t ucHighByte, ucLowByte;
 	 * tick count.  We don't need to switch context, this can only be done by
 	 * manual calls to taskYIELD();
 	 */
-	void SIG_OUTPUT_COMPARE1A( void ) __attribute__ ( ( signal ) );
-	void SIG_OUTPUT_COMPARE1A( void )
+/*
+ *	void SIG_OUTPUT_COMPARE1A( void ) __attribute__ ( ( signal ) );
+ *	void SIG_OUTPUT_COMPARE1A( void )
+ */
+ISR(TIMER1_COMPA_vect)
 	{
 		xTaskIncrementTick();
 	}
