@@ -385,6 +385,11 @@ uint8_t ucHighByte, ucLowByte;
 	 */
 #if defined (__AVR_ATmega164A__) || defined (__AVR_ATmega164PA__) || (__AVR_ATmega324A__) || defined (__AVR_ATmega324PA__) || (__AVR_ATmega644A__) || defined (__AVR_ATmega644PA__) || (__AVR_ATmega1284__) || defined (__AVR_ATmega1284P__)
 
+	// Avoid warnings
+	(void) ucHighByte;
+	(void) ucLowByte;
+
+
 	/* Set the compare value
 	 * Yes, GCC can write a 16-bit registers at once.
 	 */
