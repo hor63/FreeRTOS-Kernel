@@ -82,6 +82,8 @@ typedef unsigned char UBaseType_t;
 
 #define portDISABLE_INTERRUPTS()	asm volatile ( "cli" :: );
 #define portENABLE_INTERRUPTS()		asm volatile ( "sei" :: );
+
+#define portMEMORY_BARRIER() 		asm volatile( "" ::: "memory" )
 /*-----------------------------------------------------------*/
 
 /* Architecture specifics. */
